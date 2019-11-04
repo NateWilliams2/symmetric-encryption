@@ -1,11 +1,12 @@
 #include <sodium.h>
 #include <string.h>
-#include <time.h>
-
+#include <time.h> 
+#include "trusted-functions.c"
+#include "principal-functions.c"
 
 #define OUTPUT_ERROR  1
 #define INPUT_ERROR  2
-#define FILE_CLOSE_ERROR  3
+#define FILE_CLOSE_ERROR  3 
 #define FILE_ACCESS_ERROR  4
 #define FILENAME_CONSTRUCTION_ERROR  5
 #define TERMINAL_CONTROL_ERROR  6
@@ -65,3 +66,4 @@ int main(void){
   printf("P2 msg: %s\n",(char *)p2msg);
   return 0;
 }
+

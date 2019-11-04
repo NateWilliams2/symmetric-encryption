@@ -75,3 +75,4 @@ int provide_session_key(unsigned char *message, unsigned char *p1msg, unsigned c
   printf("\n");
   return 0;
 }
+

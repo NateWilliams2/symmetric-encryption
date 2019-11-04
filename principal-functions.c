@@ -30,3 +30,4 @@ int session_key_request(unsigned char *principal_a, unsigned char *principal_b, 
   memcpy(request + a + b + 1, fmt, b);
   return 0;
 }
+
