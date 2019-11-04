@@ -1,5 +1,6 @@
 #include <sodium.h>
 #include <string.h>
+#include <time.h>
 
 #define OUTPUT_ERROR  1
 #define INPUT_ERROR  2
@@ -13,21 +14,49 @@
 #define DECRYPTION_ERROR  10
 
 #define KEY_SIZE crypto_secretbox_KEYBYTES
-#define MAX_NAME_SIZE 100
-#define FMT_DELINIATION_SIZE 10
+#define MAX_NAME_SIZE 20
+#define TIME_SIZE 20
 
+int provide_session_key(unsigned char *message, unsigned char *p1msg, unsigned char* p2msg){
+  unsigned char session_key[KEY_SIZE];
+  crypto_secretbox_keygen(session_key);
+  unsigned char p1[MAX_NAME_SIZE];
+  unsigned char p2[MAX_NAME_SIZE];
+  time_t now = time(NULL);
+  char time_buff[TIME_SIZE];
+  strftime(time_buff, TIME_SIZE, "%Y-%m-%d %H:%M:%S", localtime(&now));
 
-int session_key_request(unsigned char *principal_a, unsigned char *principal_b, unsigned char *request){
-  unsigned char *formata = (unsigned char*)"PRINCIPAL1";
-  unsigned char *formatb = (unsigned char*)"PRINCIPAL2";
-  int a = FMT_DELINIATION_SIZE;
-  int b = sizeof(principal_a);
-  int c = FMT_DELINIATION_SIZE;
-  int d = sizeof(principal_b);
-  memcpy(request, formata, a);
-  memcpy(request + a, principal_a, b);
-  memcpy(request + a + b, formatb, c);
-  memcpy(request + a + b + c, principal_b, d);
+  int i=0;
+  int msg_size = sizeof(message);
+  for(int i = 0; message[i] != '%'; i++){
+    memcpy(p1 + i, &message[i], 1);
+  }
+  i++;
+  for(; message[i] != '%'; i++){
+    memcpy(p1 + i, &message[i], 1);
+  }
+
+  memcpy(p1msg, message, msg_size);
+  memcpy(p1msg + msg_size, session_key, KEY_SIZE);
+  memcpy(p1msg + msg_size + KEY_SIZE, (unsigned char*)time_buff, TIME_SIZE);
+
+  memcpy(p2msg, message, msg_size);
+  memcpy(p2msg + msg_size, session_key, KEY_SIZE);
+  memcpy(p2msg + msg_size + KEY_SIZE, (unsigned char*)time_buff, TIME_SIZE);
+  printf((char *)p1msg);
+  return 0;
+}
+
+//generates a session key request in request array: % + name of principal 1 + % + name of principal 2.
+//Sizes[0] and sizes[1] contain the character length of principal_a and principal_b, respectively
+int session_key_request(unsigned char *principal_a, unsigned char *principal_b, unsigned char *sizes, unsigned char *request){
+  unsigned char *fmt = (unsigned char*)"%";
+  int a = sizes[0];
+  int b = sizes[1];
+  memcpy(request, fmt, 1);
+  memcpy(request + 1, principal_a, a);
+  memcpy(request + 1 + a, fmt, 1);
+  memcpy(request + 2 + a, principal_b, b);
   return 0;
 }
 
@@ -61,11 +90,16 @@ int main(void){
   if (sodium_init() < 0) {
     perror("crypto library couldn't be initialized");
   }
-  unsigned char * principal = (unsigned char*)"alice";
-  unsigned char * trusted = (unsigned char*)"sam";
-  unsigned char request[sizeof(principal)+sizeof(trusted)+FMT_DELINIATION_SIZE*2];
+  unsigned char *principal = (unsigned char*)"bob";
+  unsigned char *trusted = (unsigned char*)"sam";
+  unsigned char sizes[2] = {3, 3};
+  int request_size = 5+3+2;
+  unsigned char request[request_size];
   generate_trusted_key(principal, trusted);
-  session_key_request(principal, trusted, request);
+  session_key_request(principal, trusted, sizes, request);
   printf("%s\n", (char *)request);
+  unsigned char p1msg[request_size + KEY_SIZE + TIME_SIZE];
+  unsigned char p2msg[request_size + KEY_SIZE + TIME_SIZE];
+  provide_session_key(request, p1msg, p2msg);
   return 0;
 }
