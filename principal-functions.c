@@ -1,3 +1,5 @@
+#define _XOPEN_SOURCE
+
 #include <sodium.h>
 #include <string.h>
 #include <time.h>
@@ -15,14 +17,22 @@
 #define ENCRYPTION_ERROR  9
 #define DECRYPTION_ERROR  10
 #define NULL_MSG_ERROR 11
+#define NAME_EXTRACTION_ERROR 12
+#define NAME_MATCH_ERROR 13
+#define TIME_PARSE_ERROR 14
+#define TIME_MATCH_ERROR 15
+#define PADDING_ERROR 16
 
+#define SECONDS_IN_DAY 86400
 #define KEY_SIZE crypto_secretbox_KEYBYTES
 #define MAX_NAME_SIZE 20
 #define TIME_SIZE 20
 #define NONCE_SIZE crypto_secretbox_NONCEBYTES
 #define REQUEST_SIZE MAX_NAME_SIZE*2 + 2
-#define MESSAGE_LEN REQUEST_SIZE + KEY_SIZE + TIME_SIZE
-#define CIPHERTEXT_LEN crypto_secretbox_MACBYTES + MESSAGE_LEN
+#define KEY_REQUEST_LEN REQUEST_SIZE + KEY_SIZE + TIME_SIZE
+#define KEY_CIPHERTEXT_LEN crypto_secretbox_MACBYTES + KEY_REQUEST_LEN
+#define MESSAGE_LEN 256
+#define MESSAGE_CIPHERTEXT_LEN crypto_secretbox_MACBYTES + MESSAGE_LEN
 
 //Reades a key from a file determined by the trusted and principal names: /trusted/principal.key
 int read_key_from_file_ext(unsigned char* folder_name, size_t folder_name_size, unsigned char* principal, unsigned char* key){
@@ -63,8 +73,8 @@ int read_key_from_file_ext(unsigned char* folder_name, size_t folder_name_size, 
   return 0;
 }
 
-bool msg_is_null(unsigned char* msg){
-	for (int i=0; i < CIPHERTEXT_LEN; i++){
+bool msg_is_null(unsigned char* msg, size_t msg_len){
+	for (int i=0; i < msg_len; i++){
 		if (msg[i] != (unsigned char)'\0'){
 			return false;
 		}
@@ -73,22 +83,154 @@ bool msg_is_null(unsigned char* msg){
 	
 }
 
-int verify_session_key_message(unsigned char* p1msg, unsigned char* p2msg, unsigned char* p1, size_t p1_size, unsigned char* p2, unsigned char* trusted){
-	if (msg_is_null(p1msg) || msg_is_null(p2msg)){
+	//copies principal names from message into p1 and p2
+int read_names_from_msg(unsigned char* message, unsigned char* p1, unsigned char* p2){
+  int i=0;
+  printf("copying p 1:\n");
+  for(; message[i] != (unsigned char)'%'; i++){
+    memcpy(p1 + i, &message[i], 1);
+  }
+  i++;
+  int j = 0; //contains index of p2, i-len(p1)
+  printf("copying p 2:\n");
+  for(; message[i] != '%'; i++){
+    memcpy(p2 + j, &message[i], 1);
+    j++;
+  }
+	if (i < 2){
+		return NAME_EXTRACTION_ERROR;
+	}
+	return 0;
+}
+
+//encrypts a given message with a given session key, saves that message with a nonce in message_enc
+int encrypt_and_send_message(unsigned char* session_key, unsigned char* message, size_t msg_size, unsigned char* message_enc){
+	//padding message
+	size_t padded_len = 0;
+	unsigned char padded_msg[MESSAGE_LEN];
+	memcpy(padded_msg, message, msg_size);
+	if (sodium_pad(&padded_len, padded_msg, msg_size, MESSAGE_LEN, MESSAGE_LEN) != 0) {
+    return PADDING_ERROR;
+	}
+	
+	//encrypting message
+	unsigned char nonce[NONCE_SIZE];
+  randombytes_buf(nonce, NONCE_SIZE);
+  if (crypto_secretbox_easy(message_enc, padded_msg, MESSAGE_LEN, nonce, session_key) != 0){
+  	return ENCRYPTION_ERROR;
+  }
+  memcpy(message_enc + MESSAGE_CIPHERTEXT_LEN, nonce, NONCE_SIZE);
+  return 0;
+}
+
+int verify_session_key_message(unsigned char* p1msg, unsigned char* p2msg, unsigned char* p1, size_t p1_size, unsigned char* p2, size_t p2_size, unsigned char* trusted, unsigned char* session_key){
+
+	//checking for null message
+	if (msg_is_null(p1msg, KEY_REQUEST_LEN) || msg_is_null(p2msg, KEY_REQUEST_LEN)){
 		return NULL_MSG_ERROR;
 	}
 	unsigned char nonce[NONCE_SIZE];
-	unsigned char msg_dec[MESSAGE_LEN];
-	memcpy(nonce, p1msg + CIPHERTEXT_LEN, NONCE_SIZE);
+	unsigned char msg_dec[KEY_REQUEST_LEN];
+	memcpy(nonce, p1msg + KEY_CIPHERTEXT_LEN, NONCE_SIZE);
 	unsigned char key[KEY_SIZE];
 	int read_key = read_key_from_file_ext(p1, p1_size, trusted, key);
 	if (read_key != 0){
 		return read_key;
 	}
-	if (crypto_secretbox_open_easy(msg_dec, p1msg, CIPHERTEXT_LEN, nonce, key) != 0) {
+	
+	//verifying decryption
+	if (crypto_secretbox_open_easy(msg_dec, p1msg, KEY_CIPHERTEXT_LEN, nonce, key) != 0) {
     return DECRYPTION_ERROR;
 	}
+
+	unsigned char p1_dec[p1_size];
+	unsigned char p2_dec[p2_size];
+	//verifying name reading
+	if (read_names_from_msg(msg_dec, p1_dec, p2_dec) != 0){
+		return NAME_EXTRACTION_ERROR;
+	}
+	
+	//verifying correct names
+	if (memcmp(p1_dec, p1, p1_size) != 0 || memcmp(p2_dec, p2, p2_size) != 0){
+		return NAME_MATCH_ERROR;
+	}
+
+	//verifying timestamp
+	unsigned char time_dec_raw[TIME_SIZE];
+	memcpy(time_dec_raw, msg_dec + REQUEST_SIZE + KEY_SIZE, TIME_SIZE);
+	struct tm tm_dec;
+	if (strptime((char*)time_dec_raw, "%Y-%m-%d %H:%M:%S", &tm_dec) == '\0'){
+		return TIME_PARSE_ERROR;
+	}
+	time_t time_dec = mktime(&tm_dec);
+	time_t now = time(NULL);
+	double time_diff = difftime(now, time_dec);
+	if(time_diff < 0 || time_diff > SECONDS_IN_DAY){
+		return TIME_MATCH_ERROR;
+	}
 	printf("Decrypted message: %s%s\n", (char*)msg_dec, (char*)msg_dec + REQUEST_SIZE);
+
+	memcpy(session_key, msg_dec + REQUEST_SIZE, KEY_SIZE);
+	return 0;
+}
+
+int receive_and_decrypt_message(unsigned char* key_message_enc, unsigned char* ciphertext, unsigned char* message_dec, unsigned char* p1, size_t p1_size, unsigned char* p2, size_t p2_size,unsigned char* trusted, size_t t_size){
+	//checking for null message
+	if (msg_is_null(key_message_enc, KEY_REQUEST_LEN) || msg_is_null(ciphertext, MESSAGE_LEN)){
+		return NULL_MSG_ERROR;
+	}
+	unsigned char nonce[NONCE_SIZE];
+	unsigned char key_message_dec[KEY_REQUEST_LEN];
+	memcpy(nonce, key_message_enc + KEY_CIPHERTEXT_LEN, NONCE_SIZE);
+	unsigned char trusted_key[KEY_SIZE];
+	int read_key = read_key_from_file_ext(p2, p2_size, trusted, trusted_key);
+	if (read_key != 0){
+		return read_key;
+	}
+	
+	//verifying decryption
+	if (crypto_secretbox_open_easy(key_message_dec, key_message_enc, KEY_CIPHERTEXT_LEN, nonce, trusted_key) != 0) {
+    return DECRYPTION_ERROR;
+	}
+
+	unsigned char p1_dec[p1_size];
+	unsigned char p2_dec[p2_size];
+	//verifying name reading
+	if (read_names_from_msg(key_message_dec, p1_dec, p2_dec) != 0){
+		return NAME_EXTRACTION_ERROR;
+	}
+	
+	//verifying correct names
+	if (memcmp(p1_dec, p1, p1_size) != 0 || memcmp(p2_dec, p2, p2_size) != 0){
+		return NAME_MATCH_ERROR;
+	}
+
+	//verifying timestamp
+	unsigned char time_dec_raw[TIME_SIZE];
+	memcpy(time_dec_raw, key_message_dec + REQUEST_SIZE + KEY_SIZE, TIME_SIZE);
+	struct tm tm_dec;
+	if (strptime((char*)time_dec_raw, "%Y-%m-%d %H:%M:%S", &tm_dec) == '\0'){
+		return TIME_PARSE_ERROR;
+	}
+	time_t time_dec = mktime(&tm_dec);
+	time_t now = time(NULL);
+	double time_diff = difftime(now, time_dec);
+	if(time_diff < 0 || time_diff > SECONDS_IN_DAY){
+		return TIME_MATCH_ERROR;
+	}
+	
+	//extracting session key
+	unsigned char session_key[KEY_SIZE];
+	memcpy(session_key, key_message_dec + REQUEST_SIZE, KEY_SIZE);
+	printf("Session Key Decrypted\n");
+	
+	//getting nonce from message
+	memcpy(nonce, ciphertext + MESSAGE_CIPHERTEXT_LEN, NONCE_SIZE);
+	
+	//verifying message decryption
+	if (crypto_secretbox_open_easy(message_dec, ciphertext, MESSAGE_CIPHERTEXT_LEN, nonce, session_key) != 0) {
+    return DECRYPTION_ERROR;
+	}
 	return 0;
 }
 

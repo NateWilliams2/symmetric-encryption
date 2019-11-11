@@ -7,3 +7,6 @@ gcc -c -Wall   -I/home/reseda/security/libsodium-stable/include   -L/home/reseda
 
 gcc -o  file-encryption -Wall   -I/home/reseda/security/libsodium-stable/include   -L/home/reseda/security/libsodium-stable/lib   -lreadline -lsodium driver.c 
 
+
+
+

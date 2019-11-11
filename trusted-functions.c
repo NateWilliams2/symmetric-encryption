@@ -1,3 +1,5 @@
+#define _XOPEN_SOURCE
+
 #include <sodium.h>
 #include <string.h>
 #include <time.h>
@@ -19,8 +21,10 @@
 #define TIME_SIZE 20
 #define NONCE_SIZE crypto_secretbox_NONCEBYTES
 #define REQUEST_SIZE MAX_NAME_SIZE*2 + 2
-#define MESSAGE_LEN REQUEST_SIZE + KEY_SIZE + TIME_SIZE
-#define CIPHERTEXT_LEN crypto_secretbox_MACBYTES + MESSAGE_LEN
+#define KEY_REQUEST_LEN REQUEST_SIZE + KEY_SIZE + TIME_SIZE
+#define KEY_CIPHERTEXT_LEN crypto_secretbox_MACBYTES + KEY_REQUEST_LEN
+#define MESSAGE_LEN 256
+#define MESSAGE_CIPHERTEXT_LEN crypto_secretbox_MACBYTES + MESSAGE_LEN
 
 //Reades a key from a file determined by the trusted and principal names: /trusted/principal.key
 int read_key_from_file(unsigned char* folder_name, size_t folder_name_size, unsigned char* principal, unsigned char* key){
@@ -98,7 +102,7 @@ int provide_session_key(unsigned char *message, unsigned char *p1msg, unsigned c
   
   //constructing message
   printf("setting up encrption:\n");
-  unsigned char msg_buff[MESSAGE_LEN];
+  unsigned char msg_buff[KEY_REQUEST_LEN];
   memcpy(msg_buff, message, REQUEST_SIZE);
   memcpy(msg_buff + REQUEST_SIZE, session_key, KEY_SIZE);
   memcpy(msg_buff + REQUEST_SIZE + KEY_SIZE, (unsigned char*)time_buff, TIME_SIZE);
@@ -108,12 +112,12 @@ int provide_session_key(unsigned char *message, unsigned char *p1msg, unsigned c
 	//encrypting messages
 	unsigned char nonce[NONCE_SIZE];
   randombytes_buf(nonce, NONCE_SIZE);
-  crypto_secretbox_easy(p1msg, msg_buff, MESSAGE_LEN, nonce, p1_key);
-  memcpy(p1msg + CIPHERTEXT_LEN, nonce, NONCE_SIZE);
+  crypto_secretbox_easy(p1msg, msg_buff, KEY_REQUEST_LEN, nonce, p1_key);
+  memcpy(p1msg + KEY_CIPHERTEXT_LEN, nonce, NONCE_SIZE);
 
   randombytes_buf(nonce, NONCE_SIZE);
-  crypto_secretbox_easy(p2msg, msg_buff, MESSAGE_LEN, nonce, p2_key);
-  memcpy(p2msg + CIPHERTEXT_LEN, nonce, NONCE_SIZE);
+  crypto_secretbox_easy(p2msg, msg_buff, KEY_REQUEST_LEN, nonce, p2_key);
+  memcpy(p2msg + KEY_CIPHERTEXT_LEN, nonce, NONCE_SIZE);
 
   return 0;
 }
