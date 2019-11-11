@@ -4,6 +4,8 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include "principal-functions.h"
+#include "file-utility.h"
 
 #define OUTPUT_ERROR  1
 #define INPUT_ERROR  2
@@ -26,44 +28,7 @@
 #define MESSAGE_LEN 256
 #define MESSAGE_CIPHERTEXT_LEN crypto_secretbox_MACBYTES + MESSAGE_LEN
 
-//Reades a key from a file determined by the trusted and principal names: /trusted/principal.key
-int read_key_from_file(unsigned char* folder_name, size_t folder_name_size, unsigned char* principal, unsigned char* key){
-	//constructing file path
-  printf("getting key:\n");
-	char keypath[MAX_NAME_SIZE+5] = "";
-	strncat(keypath, (char*)folder_name, folder_name_size);
-	strcat(keypath, "/");
-	strcat(keypath, (char*)principal);
-	strcat(keypath, ".key");
-	
-	//print path for debugging
-	char cwd[PATH_MAX];
-  getcwd(cwd, sizeof(cwd));
-  printf("Current file path: %s/k:%s\n", cwd, keypath);
-	//opening file
-  FILE * keyfile = fopen(keypath, "r");
-  if (keyfile == NULL) {
-    perror("File Open Failed: ");
-    return FILE_ACCESS_ERROR;
-	}
-	 /* Seek to the beginning of the file */
-  fseek(keyfile, 0, SEEK_SET);
-  printf("reading file:\n");
-  if (fread(key, KEY_SIZE, 1, keyfile) != KEY_SIZE){
-    if (feof(keyfile)){
-    	printf("End of file was reached.\n");
-    	}
 
-		if (ferror(keyfile)){
-		  printf("An error occurred.\n");
-		  }
-		fclose(keyfile);
-		return FILE_ACCESS_ERROR;
-  }
-  printf("file read:\n");
-  fclose(keyfile);
-  return 0;
-}
 
 //provides a session key for the encypted exchange: {A, B, Kab, T}Kas and {A, B, Kab, T}Kbs
 int provide_session_key(unsigned char *message, unsigned char *p1msg, unsigned char* p2msg, unsigned char* trusted, size_t t_size){
@@ -78,13 +43,11 @@ int provide_session_key(unsigned char *message, unsigned char *p1msg, unsigned c
 
   //copying principal names from message into p1 and p2
   int i=0;
-  printf("copying p 1:\n");
   for(; message[i] != (unsigned char)'%'; i++){
     memcpy(p1 + i, &message[i], 1);
   }
   i++;
   int j = 0; //contains index of p2, i-len(p1)
-  printf("copying p 2:\n");
   for(; message[i] != '%'; i++){
     memcpy(p2 + j, &message[i], 1);
     j++;
@@ -101,13 +64,10 @@ int provide_session_key(unsigned char *message, unsigned char *p1msg, unsigned c
   crypto_secretbox_keygen(session_key);
   
   //constructing message
-  printf("setting up encrption:\n");
   unsigned char msg_buff[KEY_REQUEST_LEN];
   memcpy(msg_buff, message, REQUEST_SIZE);
   memcpy(msg_buff + REQUEST_SIZE, session_key, KEY_SIZE);
   memcpy(msg_buff + REQUEST_SIZE + KEY_SIZE, (unsigned char*)time_buff, TIME_SIZE);
-
-	printf("Message constructed: %s%s\n", (char*)msg_buff, (char*)msg_buff + REQUEST_SIZE);
   
 	//encrypting messages
 	unsigned char nonce[NONCE_SIZE];

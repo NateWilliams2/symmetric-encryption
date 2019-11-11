@@ -4,7 +4,8 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include <stdbool.h>
+#include "principal-functions.h"
+#include "file-utility.h"
 
 #define OUTPUT_ERROR  1
 #define INPUT_ERROR  2
@@ -34,65 +35,25 @@
 #define MESSAGE_LEN 256
 #define MESSAGE_CIPHERTEXT_LEN crypto_secretbox_MACBYTES + MESSAGE_LEN
 
-//Reades a key from a file determined by the trusted and principal names: /trusted/principal.key
-int read_key_from_file_ext(unsigned char* folder_name, size_t folder_name_size, unsigned char* principal, unsigned char* key){
-	//constructing file path
-  printf("getting key:\n");
-	char keypath[MAX_NAME_SIZE+5] = "";
-	strncat(keypath, (char*)folder_name, folder_name_size);
-	strcat(keypath, "/");
-	strcat(keypath, (char*)principal);
-	strcat(keypath, ".key");
-	
-	//print path for debugging
-	char cwd[PATH_MAX];
-  getcwd(cwd, sizeof(cwd));
-  printf("Current file path: %s/k:%s\n", cwd, keypath);
-	//opening file
-  FILE * keyfile = fopen(keypath, "r");
-  if (keyfile == NULL) {
-    perror("File Open Failed: ");
-    return FILE_ACCESS_ERROR;
-	}
-	 /* Seek to the beginning of the file */
-  fseek(keyfile, 0, SEEK_SET);
-  printf("reading file:\n");
-  if (fread(key, 1, KEY_SIZE, keyfile) != KEY_SIZE){
-    if (feof(keyfile)){
-    	printf("End of file was reached.\n");
-    	}
-
-		if (ferror(keyfile)){
-		  printf("An error occurred.\n");
-		  }
-		fclose(keyfile);
-		return FILE_ACCESS_ERROR;
-  }
-  printf("file read:\n");
-  fclose(keyfile);
-  return 0;
-}
-
-bool msg_is_null(unsigned char* msg, size_t msg_len){
+//returns true if a given message of length msg_len is full of null-chars. returns false otherwise
+int msg_is_null(unsigned char* msg, size_t msg_len){
 	for (int i=0; i < msg_len; i++){
 		if (msg[i] != (unsigned char)'\0'){
-			return false;
+			return 0;
 		}
 	}
-	return true;
+	return 1;
 	
 }
 
 	//copies principal names from message into p1 and p2
 int read_names_from_msg(unsigned char* message, unsigned char* p1, unsigned char* p2){
   int i=0;
-  printf("copying p 1:\n");
   for(; message[i] != (unsigned char)'%'; i++){
     memcpy(p1 + i, &message[i], 1);
   }
   i++;
   int j = 0; //contains index of p2, i-len(p1)
-  printf("copying p 2:\n");
   for(; message[i] != '%'; i++){
     memcpy(p2 + j, &message[i], 1);
     j++;
@@ -123,17 +84,18 @@ int encrypt_and_send_message(unsigned char* session_key, unsigned char* message,
   return 0;
 }
 
+//Verifies a session key message. Checks for null msg, decryption, name extraction, name matching, timestamp parsing, timestamp matching. Then writes decrypted session_key
 int verify_session_key_message(unsigned char* p1msg, unsigned char* p2msg, unsigned char* p1, size_t p1_size, unsigned char* p2, size_t p2_size, unsigned char* trusted, unsigned char* session_key){
 
 	//checking for null message
-	if (msg_is_null(p1msg, KEY_REQUEST_LEN) || msg_is_null(p2msg, KEY_REQUEST_LEN)){
+	if (msg_is_null(p1msg, KEY_REQUEST_LEN) == 1 || msg_is_null(p2msg, KEY_REQUEST_LEN) == 1){
 		return NULL_MSG_ERROR;
 	}
 	unsigned char nonce[NONCE_SIZE];
 	unsigned char msg_dec[KEY_REQUEST_LEN];
 	memcpy(nonce, p1msg + KEY_CIPHERTEXT_LEN, NONCE_SIZE);
 	unsigned char key[KEY_SIZE];
-	int read_key = read_key_from_file_ext(p1, p1_size, trusted, key);
+	int read_key = read_key_from_file(p1, p1_size, trusted, key);
 	if (read_key != 0){
 		return read_key;
 	}
@@ -168,12 +130,12 @@ int verify_session_key_message(unsigned char* p1msg, unsigned char* p2msg, unsig
 	if(time_diff < 0 || time_diff > SECONDS_IN_DAY){
 		return TIME_MATCH_ERROR;
 	}
-	printf("Decrypted message: %s%s\n", (char*)msg_dec, (char*)msg_dec + REQUEST_SIZE);
 
 	memcpy(session_key, msg_dec + REQUEST_SIZE, KEY_SIZE);
 	return 0;
 }
 
+//receives and decrypts a message. Checks for null msg, decryption, name extraction, name matching, timestamp parsing, timestamp matching. Extracts session key from key_message_enc and uses that key to decrypt ciphertext. writes decrypted message to message_dec. 
 int receive_and_decrypt_message(unsigned char* key_message_enc, unsigned char* ciphertext, unsigned char* message_dec, unsigned char* p1, size_t p1_size, unsigned char* p2, size_t p2_size,unsigned char* trusted, size_t t_size){
 	//checking for null message
 	if (msg_is_null(key_message_enc, KEY_REQUEST_LEN) || msg_is_null(ciphertext, MESSAGE_LEN)){
@@ -183,7 +145,7 @@ int receive_and_decrypt_message(unsigned char* key_message_enc, unsigned char* c
 	unsigned char key_message_dec[KEY_REQUEST_LEN];
 	memcpy(nonce, key_message_enc + KEY_CIPHERTEXT_LEN, NONCE_SIZE);
 	unsigned char trusted_key[KEY_SIZE];
-	int read_key = read_key_from_file_ext(p2, p2_size, trusted, trusted_key);
+	int read_key = read_key_from_file(p2, p2_size, trusted, trusted_key);
 	if (read_key != 0){
 		return read_key;
 	}
@@ -222,7 +184,6 @@ int receive_and_decrypt_message(unsigned char* key_message_enc, unsigned char* c
 	//extracting session key
 	unsigned char session_key[KEY_SIZE];
 	memcpy(session_key, key_message_dec + REQUEST_SIZE, KEY_SIZE);
-	printf("Session Key Decrypted\n");
 	
 	//getting nonce from message
 	memcpy(nonce, ciphertext + MESSAGE_CIPHERTEXT_LEN, NONCE_SIZE);
@@ -235,7 +196,6 @@ int receive_and_decrypt_message(unsigned char* key_message_enc, unsigned char* c
 }
 
 //generates a session key request in request array: name of principal 1 + % + name of principal 2 + %
-//Sizes[0] and sizes[1] contain the character length of principal_a and principal_b, respectively
 int session_key_request(unsigned char *principal_1, size_t p1_size, unsigned char *principal_2, size_t p2_size, unsigned char *request){
   unsigned char *fmt = (unsigned char*)"%";
   memcpy(request, principal_1, p1_size);
