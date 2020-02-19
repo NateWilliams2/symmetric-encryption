@@ -1,3 +1,7 @@
+# Symmetric Encryption
+This program uses the libsodium library to implement a symmetric encryption protocol with public-private keys. The program was designed as an assignment for CS-214 Computer and Network Security at Grinnell College. 
+
+This program includes dependencies on Grinnell College's MathLan network and can not compile elsewhere. 
 Run the following commands in order to compile the program file-encryption:
 
 export LD_RUN_PATH=/home/reseda/security/libsodium-stable/lib
